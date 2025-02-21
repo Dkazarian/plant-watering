@@ -9,11 +9,14 @@
   #define dprintln(x)
 #endif
 
-// ALARMS
+// Alerts
 const int DRY_SOIL = 1;
-const int WET_SOIL = 2;
-const int WATERING_FAILED = 3;
-const int BATTERY_LOW = 4;
+const int WET_SOIL = 0;
+const int WATERING_FAILED = 4;
+const int LOW_BATTERY = 3; // Fixed uninitialized constant
+
+// Battery
+const int LOW_BATTERY_THRESHOLD = 3100; 
 
 // 📌 Pin Definitions
 const int SENSOR_PIN = A0;
@@ -26,19 +29,19 @@ const int BUTTON_PIN = 4;
 
 // Light Sleep Settings
 const long SLEEP_CYCLE_SECONDS = 8L;
-const long TOTAL_SLEEP_SECONDS = 8L * 60L * 60L;
+const long TOTAL_SLEEP_SECONDS = 6L * 60L * 60L;
 
-// SENSOR AND PUMP
+// Sensor and Pump
 const int WATERPUMP_SECONDS = 6;
 const int SENSOR_STABILIZATION = 200;
-const int MOISTURE_INCREASE_WAIT = 10;
+const int MOISTURE_INCREASE_WAIT = 120;
 const int MOISTURE_INCREASE_THRESHOLD = 5;
 const int MOISTURE_THRESHOLD = 35;
 
 const int AIR_VALUE = 630;
 const int WATER_VALUE = 270;
 
-int lastMoistureRead = 0;
+int lastMoisturePercent = 0;
 
 void sleepSeconds(int seconds) {
   for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
@@ -48,7 +51,7 @@ void sleepSeconds(int seconds) {
 }
 
 void setup() {
-  // PINS SETUP
+  // Pins setup
   pinMode(PUMP_PIN, OUTPUT);
   digitalWrite(PUMP_PIN, LOW);
   pinMode(SENSOR_POWER, OUTPUT);
@@ -64,12 +67,16 @@ void setup() {
 
 void loop() {
   if (mustWaterPlant(MOISTURE_THRESHOLD)) {
-    pumpWaterForSeconds(WATERPUMP_SECONDS);
-    sleepSeconds(MOISTURE_INCREASE_WAIT);
-    warnIfNoWater();
+    if (isBatteryLow()) {
+      alert(LOW_BATTERY);
+    } else {
+      pumpWaterForSeconds(WATERPUMP_SECONDS);
+      sleepSeconds(MOISTURE_INCREASE_WAIT);
+      warnIfNoWater();
+    }
   } else {
-    alarm(WET_SOIL);
-  }
+    alert(WET_SOIL);
+  }  
   sleepSeconds(TOTAL_SLEEP_SECONDS);
 }
 
@@ -79,6 +86,7 @@ int getMoisturePercent() {
   delay(SENSOR_STABILIZATION);
 
   int moistureValue = analogRead(SENSOR_PIN);
+  
   digitalWrite(SENSOR_POWER, LOW);
   dprint("Sensor: ");
   dprintln(moistureValue);
@@ -89,6 +97,7 @@ int getMoisturePercent() {
   dprint(moisturePercent);
   dprintln("%");
 
+  lastMoisturePercent = moisturePercent;
   return moisturePercent;
 }
 
@@ -96,22 +105,23 @@ bool mustWaterPlant(int moistureThreshold) {
     int moisturePercent = getMoisturePercent();
     bool drySoil = moisturePercent < moistureThreshold;
     if (drySoil) {
-      alarm(DRY_SOIL);
+      alert(DRY_SOIL);
     } else {
-      alarm(WET_SOIL);
+      alert(WET_SOIL);
     }
     return drySoil;
 }
 
 void warnIfNoWater() {
-    int moisturePercent = getMoisturePercent();
-    if (lastMoistureRead - moisturePercent < MOISTURE_INCREASE_THRESHOLD) {
-      alarm(WATERING_FAILED);
-    }
-    lastMoistureRead = moisturePercent;
+  int lastMoistureRead = lastMoisturePercent;
+  int moisturePercent = getMoisturePercent();
+  if (lastMoistureRead - moisturePercent < MOISTURE_INCREASE_THRESHOLD) {
+    alert(WATERING_FAILED);
+  }
+
 }
 
-void alarm(int pulses) {
+void alert(int pulses) {
   for (int i = 0; i < pulses; i++) {
     digitalWrite(BUZZER_PIN, HIGH);
     delay(200);
@@ -126,4 +136,30 @@ void pumpWaterForSeconds(int seconds) {
     delay(seconds * 1000);
     digitalWrite(PUMP_PIN, LOW);
     dprintln("Watering complete.");
+}
+
+bool isBatteryLow() { // Fixed return type
+  long batteryVoltage = readVcc();
+  dprint("Battery Voltage: ");
+  dprint(batteryVoltage);
+  dprintln(" mV");
+
+  return batteryVoltage < LOW_BATTERY_THRESHOLD;
+}
+
+// Measure VCC without voltage divider
+long readVcc() {
+  // Set ADC to read internal 1.1V reference
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+  delay(2); // Wait for ADC to stabilize
+
+  // Start conversion
+  ADCSRA |= _BV(ADSC);
+  while (bit_is_set(ADCSRA, ADSC)); // Wait for conversion
+
+  // Read ADC value
+  uint16_t result = ADC;
+
+  // Calculate VCC (battery voltage in mV)
+  return (1100L * 1024L) / result;
 }
