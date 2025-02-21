@@ -62,11 +62,13 @@ void setup() {
   digitalWrite(SENSOR_POWER, LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
-  pinMode(BUTTON_PIN, INPUT_PULLUP); // Internal pull-up resistor
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   #ifdef DEBUG
     Serial.begin(9600);
     delay(2500);
+  #else
+    Serial.end();
   #endif
 
   loadCalibrationValues();
@@ -88,6 +90,17 @@ void loop() {
   sleepSeconds(TOTAL_SLEEP_SECONDS);
 }
 
+bool mustWaterPlant(int moistureThreshold) {
+  int moisturePercent = getMoisturePercent();
+  bool drySoil = moisturePercent < moistureThreshold;
+  if (drySoil) {
+    alert(DRY_SOIL);
+  } else {
+    alert(WET_SOIL);
+  }
+  return drySoil;
+}
+
 int getMoisturePercent() {
   digitalWrite(SENSOR_POWER, HIGH);
   analogRead(SENSOR_PIN);
@@ -107,15 +120,12 @@ int getMoisturePercent() {
   return moisturePercent;
 }
 
-bool mustWaterPlant(int moistureThreshold) {
-    int moisturePercent = getMoisturePercent();
-    bool drySoil = moisturePercent < moistureThreshold;
-    if (drySoil) {
-      alert(DRY_SOIL);
-    } else {
-      alert(WET_SOIL);
-    }
-    return drySoil;
+void pumpWaterForSeconds(int seconds) {
+  dprintln("Watering the plant...");
+  digitalWrite(PUMP_PIN, HIGH);
+  delay(seconds * 1000);
+  digitalWrite(PUMP_PIN, LOW);
+  dprintln("Watering complete.");
 }
 
 void warnIfNoWater() {
@@ -123,14 +133,6 @@ void warnIfNoWater() {
     if (moisturePercent - lastMoistureRead < MOISTURE_INCREASE_THRESHOLD) {
       alert(WATERING_FAILED);
     }
-}
-
-void pumpWaterForSeconds(int seconds) {
-  dprintln("Watering the plant...");
-  digitalWrite(PUMP_PIN, HIGH);
-  delay(seconds * 1000);
-  digitalWrite(PUMP_PIN, LOW);
-  dprintln("Watering complete.");
 }
 
 void alert(int pulses) {
@@ -189,6 +191,18 @@ bool isBatteryLow() {
   return batteryVoltage < LOW_BATTERY_THRESHOLD;
 }
 
+void sleepSeconds(int seconds) {
+  for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+    delay(10);
+    if (i % 3 == 0) {
+      if (isButtonHeld(1000)) {
+        calibrateSensor();
+      }
+    }
+  }
+}
+
 long readVcc() {
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
   delay(2);
@@ -210,16 +224,4 @@ bool isButtonHeld(int durationMs) {
     }
   }
   return false;
-}
-
-void sleepSeconds(int seconds) {
-  for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
-    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-    delay(10);
-    if (i % 3 == 0) {
-      if (isButtonHeld(1000)) {
-        calibrateSensor();
-      }
-    }
-  }
 }
