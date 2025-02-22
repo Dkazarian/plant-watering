@@ -10,6 +10,8 @@
   #define dprintln(x)
 #endif
 
+//#define CLEAR_MEMORY
+
 // Alerts
 const int DRY_SOIL = 2;
 const int WET_SOIL = 1;
@@ -34,6 +36,10 @@ const long SHORT_SLEEP_SECONDS = 1L * 60L * 60L;
 // Sensor and Pump
 const int WATERPUMP_SECONDS = 6;
 const int SENSOR_STABILIZATION = 200;
+const int SENSOR_ERROR = 18;
+
+const int AIR_VALUE = 624;
+const int WATER_VALUE = 273;
 
 const int EEPROM_CALIBRATED_ADDR = 10;
 const int EEPROM_DRY_ADDR = 11;
@@ -42,12 +48,12 @@ int dryValue;
 int soilDrynessValue;
 
 void loadCalibrationValues() {
-  boolean calibrated;
+  boolean calibrated = false;
   EEPROM.get(EEPROM_CALIBRATED_ADDR, calibrated);
   EEPROM.get(EEPROM_DRY_ADDR, dryValue);
 
   if (!calibrated || dryValue == 0xFFFF ) {
-    dryValue = 378;
+    dryValue = AIR_VALUE - (AIR_VALUE - WATER_VALUE) * 0.5;
   }
   dprint("Dry point: ");
   dprintln(dryValue);
@@ -68,6 +74,11 @@ void setup() {
     Serial.end();
   #endif
 
+  #ifdef CLEAR_MEMORY
+    for (int i = 0; i < EEPROM.length(); i++)
+      EEPROM.write(i, 0xFF);
+  #endif
+  
   loadCalibrationValues();
 
   if (isBatteryLow()) {
@@ -96,7 +107,7 @@ void loop() {
 }
 
 bool mustWaterPlant() {
-  return getSoilDryness() >= dryValue;
+  return getSoilDryness() + SENSOR_ERROR  >= dryValue;
 }
 
 int getSoilDryness() {
@@ -112,7 +123,7 @@ int getSoilDryness() {
 }
 
 void pumpWaterForSeconds(int seconds) {
-  dprintln("Watering the plant...");
+  dprintln("Watering...");
   digitalWrite(PUMP_PIN, HIGH);
   delay(seconds * 1000);
   digitalWrite(PUMP_PIN, LOW);
@@ -132,7 +143,6 @@ void alert(int pulses) {
 
 void calibrateSensor() {
   dprintln("Entering Calibration Mode...");
-  alert(2); // Beep twice to indicate entering calibration mode
 
   digitalWrite(SENSOR_POWER, HIGH);
   delay(SENSOR_STABILIZATION);
