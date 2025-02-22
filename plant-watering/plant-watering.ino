@@ -11,9 +11,8 @@
 #endif
 
 // Alerts
-const int DRY_SOIL = 1;
-const int WET_SOIL = 2;
-const int WATERING_FAILED = 4;
+const int DRY_SOIL = 2;
+const int WET_SOIL = 1;
 const int LOW_BATTERY = 3;
 const int ENTER_CALIBRATION = 2;
 
@@ -29,19 +28,18 @@ const int BUTTON_PIN = 4;
 
 // Light Sleep Settings
 const long SLEEP_CYCLE_SECONDS = 8L;
-const long TOTAL_SLEEP_SECONDS = 6L * 60L * 60L;
+const long LONG_SLEEP_SECONDS = 6L * 60L * 60L;
+const long SHORT_SLEEP_SECONDS = 1L * 60L * 60L;
 
 // Sensor and Pump
 const int WATERPUMP_SECONDS = 6;
 const int SENSOR_STABILIZATION = 200;
-const int MOISTURE_INCREASE_WAIT = 120;
-const int MOISTURE_INCREASE_THRESHOLD = 5;
 
 const int EEPROM_CALIBRATED_ADDR = 10;
 const int EEPROM_DRY_ADDR = 11;
 
 int dryValue;
-int soilDrynessValue = 0;
+int soilDrynessValue;
 
 void loadCalibrationValues() {
   boolean calibrated;
@@ -79,20 +77,22 @@ void setup() {
 
 void loop() {
   if (mustWaterPlant()) {
-    
     alert(DRY_SOIL);
     if (isBatteryLow()) {
       alert(LOW_BATTERY);
     } else {
+      // Since I don't have different watering modes for pot sizes
+      // I just water in small amounts, have short sleeps so the soil
+      // absorbs it and repeat until I reached the set value.
+      // Then I make a 'long sleep.
       pumpWaterForSeconds(WATERPUMP_SECONDS);
-      sleepSeconds(MOISTURE_INCREASE_WAIT);
-      warnIfNoWater(MOISTURE_INCREASE_THRESHOLD);
+      sleepSeconds(SHORT_SLEEP_SECONDS);
     }
   } else {
-    alert(DRY_SOIL);
+    alert(WET_SOIL);
   }
 
-  sleepSeconds(TOTAL_SLEEP_SECONDS);
+  sleepSeconds(LONG_SLEEP_SECONDS);
 }
 
 bool mustWaterPlant() {
@@ -117,13 +117,6 @@ void pumpWaterForSeconds(int seconds) {
   delay(seconds * 1000);
   digitalWrite(PUMP_PIN, LOW);
   dprintln("Watering complete.");
-}
-
-void warnIfNoWater(int moistureThreshold) {
-    int previousDryness = soilDrynessValue;
-    if (getSoilDryness() >= previousDryness + moistureThreshold) {
-      alert(WATERING_FAILED);
-    }
 }
 
 void alert(int pulses) {
@@ -169,9 +162,10 @@ void sleepSeconds(int seconds) {
   for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
     delay(10);
-    if (i % 3 == 0) {
-      if (isButtonHeld(1000)) {
+    if (i % 2 == 0) {
+      if (digitalRead(BUTTON_PIN) == LOW) {
         calibrateSensor();
+        return;
       }
     }
   }
@@ -186,16 +180,4 @@ long readVcc() {
 
   uint16_t result = ADC;
   return (1100L * 1024L) / result;
-}
-
-bool isButtonHeld(int durationMs) {
-  int count = 0;
-  while (digitalRead(BUTTON_PIN) == LOW) {
-    delay(10);
-    count += 10;
-    if (count >= durationMs) {
-      return true;
-    }
-  }
-  return false;
 }
