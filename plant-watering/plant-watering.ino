@@ -12,7 +12,7 @@
 
 // Alerts
 const int DRY_SOIL = 1;
-const int WET_SOIL = 0;
+const int WET_SOIL = 2;
 const int WATERING_FAILED = 4;
 const int LOW_BATTERY = 3;
 const int ENTER_CALIBRATION = 2;
@@ -37,17 +37,22 @@ const int SENSOR_STABILIZATION = 200;
 const int MOISTURE_INCREASE_WAIT = 120;
 const int MOISTURE_INCREASE_THRESHOLD = 5;
 
-const int EEPROM_DRY_ADDR = 0;
+const int EEPROM_CALIBRATED_ADDR = 10;
+const int EEPROM_DRY_ADDR = 11;
 
 int dryValue;
 int soilDrynessValue = 0;
 
 void loadCalibrationValues() {
+  boolean calibrated;
+  EEPROM.get(EEPROM_CALIBRATED_ADDR, calibrated);
   EEPROM.get(EEPROM_DRY_ADDR, dryValue);
 
-  if (dryValue == 0xFFFF ) {
+  if (!calibrated || dryValue == 0xFFFF ) {
     dryValue = 378;
   }
+  dprint("Dry point: ");
+  dprintln(dryValue);
 }
 
 void setup() {
@@ -61,7 +66,6 @@ void setup() {
 
   #ifdef DEBUG
     Serial.begin(9600);
-    delay(2500);
   #else
     Serial.end();
   #endif
@@ -75,6 +79,8 @@ void setup() {
 
 void loop() {
   if (mustWaterPlant()) {
+    
+    alert(DRY_SOIL);
     if (isBatteryLow()) {
       alert(LOW_BATTERY);
     } else {
@@ -83,20 +89,14 @@ void loop() {
       warnIfNoWater(MOISTURE_INCREASE_THRESHOLD);
     }
   } else {
-    alert(WET_SOIL);
+    alert(DRY_SOIL);
   }
 
   sleepSeconds(TOTAL_SLEEP_SECONDS);
 }
 
 bool mustWaterPlant() {
-  bool drySoil = getSoilDryness() >= dryValue;
-  if (drySoil) {
-    alert(DRY_SOIL);
-  } else {
-    alert(WET_SOIL);
-  }
-  return drySoil;
+  return getSoilDryness() >= dryValue;
 }
 
 int getSoilDryness() {
@@ -127,6 +127,8 @@ void warnIfNoWater(int moistureThreshold) {
 }
 
 void alert(int pulses) {
+  dprint(pulses);
+  dprintln(" beeps.");
   for (int i = 0; i < pulses; i++) {
     digitalWrite(BUZZER_PIN, HIGH);
     delay(200);
@@ -145,11 +147,13 @@ void calibrateSensor() {
   dryValue = getSoilDryness();
   alert(1);
 
-  EEPROM.write(EEPROM_DRY_ADDR, (dryValue >> 8) & 0xFF);
-  EEPROM.write(EEPROM_DRY_ADDR + 1, dryValue & 0xFF);
+
+  EEPROM.put(EEPROM_CALIBRATED_ADDR, true);
+  EEPROM.put(EEPROM_DRY_ADDR, dryValue);
 
   digitalWrite(SENSOR_POWER, LOW);
-  dprintln("Calibration complete.");
+  dprint("Dry value set to ");
+  dprintln(dryValue);
 }
 
 bool isBatteryLow() {
