@@ -36,22 +36,17 @@ const int WATERPUMP_SECONDS = 6;
 const int SENSOR_STABILIZATION = 200;
 const int MOISTURE_INCREASE_WAIT = 120;
 const int MOISTURE_INCREASE_THRESHOLD = 5;
-const int MOISTURE_THRESHOLD = 35;
 
-int AIR_VALUE;
-int WATER_VALUE;
-const int EEPROM_AIR_ADDR = 0;
-const int EEPROM_WATER_ADDR = 2;
+const int EEPROM_DRY_ADDR = 0;
 
-int lastMoistureRead = 0;
+int dryValue;
+int soilDrynessValue = 0;
 
 void loadCalibrationValues() {
-  EEPROM.get(EEPROM_AIR_ADDR, AIR_VALUE);
-  EEPROM.get(EEPROM_WATER_ADDR, WATER_VALUE);
+  EEPROM.get(EEPROM_DRY_ADDR, dryValue);
 
-  if (AIR_VALUE == 0xFFFF || WATER_VALUE == 0xFFFF) {
-    AIR_VALUE = 630;  // Default values
-    WATER_VALUE = 270;
+  if (dryValue == 0xFFFF ) {
+    dryValue = 378;
   }
 }
 
@@ -72,16 +67,20 @@ void setup() {
   #endif
 
   loadCalibrationValues();
+
+  if (isBatteryLow()) {
+    alert(LOW_BATTERY);
+  }
 }
 
 void loop() {
-  if (mustWaterPlant(MOISTURE_THRESHOLD)) {
+  if (mustWaterPlant()) {
     if (isBatteryLow()) {
       alert(LOW_BATTERY);
     } else {
       pumpWaterForSeconds(WATERPUMP_SECONDS);
       sleepSeconds(MOISTURE_INCREASE_WAIT);
-      warnIfNoWater();
+      warnIfNoWater(MOISTURE_INCREASE_THRESHOLD);
     }
   } else {
     alert(WET_SOIL);
@@ -90,9 +89,8 @@ void loop() {
   sleepSeconds(TOTAL_SLEEP_SECONDS);
 }
 
-bool mustWaterPlant(int moistureThreshold) {
-  int moisturePercent = getMoisturePercent();
-  bool drySoil = moisturePercent < moistureThreshold;
+bool mustWaterPlant() {
+  bool drySoil = getSoilDryness() >= dryValue;
   if (drySoil) {
     alert(DRY_SOIL);
   } else {
@@ -101,23 +99,16 @@ bool mustWaterPlant(int moistureThreshold) {
   return drySoil;
 }
 
-int getMoisturePercent() {
+int getSoilDryness() {
   digitalWrite(SENSOR_POWER, HIGH);
   analogRead(SENSOR_PIN);
   delay(SENSOR_STABILIZATION);
 
-  int moistureValue = analogRead(SENSOR_PIN);
+  soilDrynessValue = analogRead(SENSOR_PIN);
   digitalWrite(SENSOR_POWER, LOW);
   dprint("Sensor: ");
-  dprintln(moistureValue);
-
-  int moisturePercent = map(moistureValue, AIR_VALUE, WATER_VALUE, 0, 100);
-  moisturePercent = constrain(moisturePercent, 0, 100);
-  dprint("Soil Moisture: ");
-  dprint(moisturePercent);
-  dprintln("%");
-
-  return moisturePercent;
+  dprintln(soilDrynessValue);
+  return soilDrynessValue;
 }
 
 void pumpWaterForSeconds(int seconds) {
@@ -128,9 +119,9 @@ void pumpWaterForSeconds(int seconds) {
   dprintln("Watering complete.");
 }
 
-void warnIfNoWater() {
-    int moisturePercent = getMoisturePercent();
-    if (moisturePercent - lastMoistureRead < MOISTURE_INCREASE_THRESHOLD) {
+void warnIfNoWater(int moistureThreshold) {
+    int previousDryness = soilDrynessValue;
+    if (getSoilDryness() >= previousDryness + moistureThreshold) {
       alert(WATERING_FAILED);
     }
 }
@@ -151,32 +142,11 @@ void calibrateSensor() {
   digitalWrite(SENSOR_POWER, HIGH);
   delay(SENSOR_STABILIZATION);
 
-  // Measure Air Value
-  dprintln("Measuring AIR value. Press button when ready.");
-  while (digitalRead(BUTTON_PIN) == HIGH) {
-    AIR_VALUE = analogRead(SENSOR_PIN);
-    dprint("Current AIR value: ");
-    dprintln(AIR_VALUE);
-    delay(500); // Slow down readings
-  }
-  
-  alert(1); // Beep once to confirm AIR_VALUE stored
-  EEPROM.write(EEPROM_AIR_ADDR, (AIR_VALUE >> 8) & 0xFF);
-  EEPROM.write(EEPROM_AIR_ADDR + 1, AIR_VALUE & 0xFF);
-  delay(500); // Debounce
-  
-  // Measure Water Value
-  dprintln("Measuring WATER value. Press button when ready.");
-  while (digitalRead(BUTTON_PIN) == HIGH) {
-    WATER_VALUE = analogRead(SENSOR_PIN);
-    dprint("Current WATER value: ");
-    dprintln(WATER_VALUE);
-    delay(500);
-  }
-  
-  alert(2); // Beep twice to confirm WATER_VALUE stored
-  EEPROM.write(EEPROM_WATER_ADDR, (WATER_VALUE >> 8) & 0xFF);
-  EEPROM.write(EEPROM_WATER_ADDR + 1, WATER_VALUE & 0xFF);
+  dryValue = getSoilDryness();
+  alert(1);
+
+  EEPROM.write(EEPROM_DRY_ADDR, (dryValue >> 8) & 0xFF);
+  EEPROM.write(EEPROM_DRY_ADDR + 1, dryValue & 0xFF);
 
   digitalWrite(SENSOR_POWER, LOW);
   dprintln("Calibration complete.");
