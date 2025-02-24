@@ -53,10 +53,15 @@ void loadCalibrationValues() {
   EEPROM.get(EEPROM_DRY_ADDR, dryValue);
 
   if (!calibrated || dryValue == 0xFFFF ) {
-    dryValue = AIR_VALUE - (AIR_VALUE - WATER_VALUE) * 0.5;
+    dryValue = WATER_VALUE + (AIR_VALUE - WATER_VALUE) * 0.7;
   }
   dprint("Dry point: ");
-  dprintln(dryValue);
+  dprint(dryValue);
+  int moisturePercent = getMoisturePercent(dryValue);
+  dprint(" (");
+  dprint(moisturePercent);
+  dprintln("% moisture)");
+
 }
 
 void setup() {
@@ -118,8 +123,19 @@ int getSoilDryness() {
   soilDrynessValue = analogRead(SENSOR_PIN);
   digitalWrite(SENSOR_POWER, LOW);
   dprint("Sensor: ");
-  dprintln(soilDrynessValue);
+  dprint(soilDrynessValue);
+
+  int moisturePercent = getMoisturePercent(soilDrynessValue);
+  dprint(" (");
+  dprint(moisturePercent);
+  dprintln("% moisture)");
+
   return soilDrynessValue;
+}
+
+int getMoisturePercent(int drynessValue) {
+  int moisturePercent = map(drynessValue, AIR_VALUE, WATER_VALUE, 0, 100);
+  return constrain(moisturePercent, 0, 100);
 }
 
 void pumpWaterForSeconds(int seconds) {
@@ -154,9 +170,15 @@ void calibrateSensor() {
   EEPROM.put(EEPROM_CALIBRATED_ADDR, true);
   EEPROM.put(EEPROM_DRY_ADDR, dryValue);
 
+
+  int moisturePercent = getMoisturePercent(dryValue);
+  
   digitalWrite(SENSOR_POWER, LOW);
   dprint("Dry value set to ");
-  dprintln(dryValue);
+  dprint(dryValue);
+  dprint(" (");
+  dprint(moisturePercent);
+  dprintln("% moisture)");
 }
 
 bool isBatteryLow() {
