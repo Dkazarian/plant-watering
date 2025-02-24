@@ -21,16 +21,16 @@ const int ENTER_CALIBRATION = 2;
 // Battery
 const int LOW_BATTERY_THRESHOLD = 3100; 
 
-// 📌 Pin Definitions
+// Pin Definitions
 const int SENSOR_PIN = A0;
 const int SENSOR_POWER = 13;   
 const int PUMP_PIN = 5;
 const int BUZZER_PIN = 10; 
-const int BUTTON_PIN = 4;     
+const int BUTTON_PIN = 4; // Move to interrupt pin
 
 // Light Sleep Settings
 const long SLEEP_CYCLE_SECONDS = 8L;
-const long LONG_SLEEP_SECONDS = 6L * 60L * 60L;
+const long LONG_SLEEP_SECONDS = 24L * 60L * 60L;
 const long SHORT_SLEEP_SECONDS = 1L * 60L * 60L;
 
 // Sensor and Pump
@@ -46,6 +46,7 @@ const int EEPROM_DRY_ADDR = 11;
 
 int dryValue;
 int soilDrynessValue;
+int calibratedThisRun = false;
 
 void loadCalibrationValues() {
   boolean calibrated = false;
@@ -169,7 +170,7 @@ void calibrateSensor() {
 
   EEPROM.put(EEPROM_CALIBRATED_ADDR, true);
   EEPROM.put(EEPROM_DRY_ADDR, dryValue);
-
+  calibratedThisRun = true;
 
   int moisturePercent = getMoisturePercent(dryValue);
   
@@ -193,8 +194,9 @@ bool isBatteryLow() {
 void sleepSeconds(int seconds) {
   for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-    delay(10);
-    if (i % 2 == 0) {
+    if (!calibratedThisRun && i % 3 == 0) {
+      // Change this to an interrupt
+       delay(10);
       if (digitalRead(BUTTON_PIN) == LOW) {
         calibrateSensor();
         return;
