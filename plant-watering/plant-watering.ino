@@ -103,13 +103,12 @@ void loop() {
       // absorbs it and repeat until I reached the set value.
       // Then I make a 'long sleep.
       pumpWaterForSeconds(WATERPUMP_SECONDS);
-      sleepSeconds(SHORT_SLEEP_SECONDS);
     }
+    sleepSeconds(SHORT_SLEEP_SECONDS);
   } else {
     alert(WET_SOIL);
+    sleepSeconds(LONG_SLEEP_SECONDS);
   }
-
-  sleepSeconds(LONG_SLEEP_SECONDS);
 }
 
 bool mustWaterPlant() {
