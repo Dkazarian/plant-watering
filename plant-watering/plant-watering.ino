@@ -13,10 +13,10 @@
 //#define CLEAR_MEMORY
 
 // Alerts
-const int DRY_SOIL = 2;
-const int WET_SOIL = 1;
+const int DRY_SOIL = 1;
+const int WET_SOIL = 0;
 const int LOW_BATTERY = 3;
-const int ENTER_CALIBRATION = 2;
+const int ENTER_CALIBRATION = 3;
 
 // Battery
 const int LOW_BATTERY_THRESHOLD = 3100; 
@@ -26,7 +26,7 @@ const int SENSOR_PIN = A0;
 const int SENSOR_POWER = 13;   
 const int PUMP_PIN = 5;
 const int BUZZER_PIN = 10; 
-const int BUTTON_PIN = 4; // Move to interrupt pin
+const int BUTTON_PIN = 2;     
 
 // Light Sleep Settings
 const long SLEEP_CYCLE_SECONDS = 8L;
@@ -44,9 +44,11 @@ const int WATER_VALUE = 273;
 const int EEPROM_CALIBRATED_ADDR = 10;
 const int EEPROM_DRY_ADDR = 11;
 
+const int LONG_PRESS_THRESHOLD = 2000;
+
 int dryValue;
 int soilDrynessValue;
-int calibratedThisRun = false;
+volatile bool calibrateFlag = false;
 
 void loadCalibrationValues() {
   boolean calibrated = false;
@@ -62,7 +64,18 @@ void loadCalibrationValues() {
   dprint(" (");
   dprint(moisturePercent);
   dprintln("% moisture)");
+}
 
+void updateEEPROMAndPrint() {
+  EEPROM.put(EEPROM_CALIBRATED_ADDR, true);
+  EEPROM.put(EEPROM_DRY_ADDR, dryValue);
+  int moisturePercent = getMoisturePercent(dryValue);
+  digitalWrite(SENSOR_POWER, LOW);
+  dprint("Dry value set to ");
+  dprint(dryValue);
+  dprint(" (");
+  dprint(moisturePercent);
+  dprintln("% moisture)");
 }
 
 void setup() {
@@ -72,8 +85,10 @@ void setup() {
   digitalWrite(SENSOR_POWER, LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-
+  pinMode(BUTTON_PIN, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+ 
   #ifdef DEBUG
     Serial.begin(9600);
   #else
@@ -84,6 +99,8 @@ void setup() {
     for (int i = 0; i < EEPROM.length(); i++)
       EEPROM.write(i, 0xFF);
   #endif
+
+  dprintln("Starting...");
   
   loadCalibrationValues();
 
@@ -98,11 +115,7 @@ void loop() {
     if (isBatteryLow()) {
       alert(LOW_BATTERY);
     } else {
-      // Since I don't have different watering modes for pot sizes
-      // I just water in small amounts, have short sleeps so the soil
-      // absorbs it and repeat until I reached the set value.
-      // Then I make a 'long sleep.
-      pumpWaterForSeconds(WATERPUMP_SECONDS);
+      //pumpWaterForSeconds(WATERPUMP_SECONDS);
     }
     sleepSeconds(SHORT_SLEEP_SECONDS);
   } else {
@@ -119,17 +132,14 @@ int getSoilDryness() {
   digitalWrite(SENSOR_POWER, HIGH);
   analogRead(SENSOR_PIN);
   delay(SENSOR_STABILIZATION);
-
   soilDrynessValue = analogRead(SENSOR_PIN);
   digitalWrite(SENSOR_POWER, LOW);
   dprint("Sensor: ");
   dprint(soilDrynessValue);
-
   int moisturePercent = getMoisturePercent(soilDrynessValue);
   dprint(" (");
   dprint(moisturePercent);
   dprintln("% moisture)");
-
   return soilDrynessValue;
 }
 
@@ -159,26 +169,23 @@ void alert(int pulses) {
 
 void calibrateSensor() {
   dprintln("Entering Calibration Mode...");
-
   digitalWrite(SENSOR_POWER, HIGH);
   delay(SENSOR_STABILIZATION);
-
   dryValue = getSoilDryness();
   alert(1);
+  updateEEPROMAndPrint();
+}
 
+void resetToDefault() {
+  dryValue = WATER_VALUE + (AIR_VALUE - WATER_VALUE) * 0.7;
+  updateEEPROMAndPrint();
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(3000);
+  digitalWrite(LED_BUILTIN, LOW);
+}
 
-  EEPROM.put(EEPROM_CALIBRATED_ADDR, true);
-  EEPROM.put(EEPROM_DRY_ADDR, dryValue);
-  calibratedThisRun = true;
-
-  int moisturePercent = getMoisturePercent(dryValue);
-  
-  digitalWrite(SENSOR_POWER, LOW);
-  dprint("Dry value set to ");
-  dprint(dryValue);
-  dprint(" (");
-  dprint(moisturePercent);
-  dprintln("% moisture)");
+void buttonISR() {
+  calibrateFlag = true;
 }
 
 bool isBatteryLow() {
@@ -186,31 +193,44 @@ bool isBatteryLow() {
   dprint("Battery Voltage: ");
   dprint(batteryVoltage);
   dprintln(" mV");
-
   return batteryVoltage < LOW_BATTERY_THRESHOLD;
 }
 
 void sleepSeconds(int seconds) {
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, FALLING); 
   for (int i = 0; i < seconds / SLEEP_CYCLE_SECONDS; i++) {
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-    if (!calibratedThisRun && i % 3 == 0) {
-      // Change this to an interrupt
-       delay(10);
-      if (digitalRead(BUTTON_PIN) == LOW) {
-        calibrateSensor();
-        return;
-      }
-    }
+    if (calibrateFlag) {
+      detachInterrupt(digitalPinToInterrupt(BUTTON_PIN));
+      handleButtonPressed();
+      return;
+    }  
   }
+}
+
+void handleButtonPressed() {
+  if (calibrateFlag) {
+      unsigned long pressStartTime = millis();
+      while (digitalRead(BUTTON_PIN) == LOW) {
+        delay(10);
+      }
+      unsigned long pressDuration = millis() - pressStartTime;
+      if (pressDuration >= LONG_PRESS_THRESHOLD) {
+        resetToDefault();
+      } else {
+        calibrateSensor();
+      }
+      attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), buttonISR, FALLING);
+      delay(1000);
+      calibrateFlag = false;
+  }   
 }
 
 long readVcc() {
   ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
   delay(2);
-
   ADCSRA |= _BV(ADSC);
   while (bit_is_set(ADCSRA, ADSC));
-
   uint16_t result = ADC;
   return (1100L * 1024L) / result;
 }
